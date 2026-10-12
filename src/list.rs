@@ -98,7 +98,8 @@ mod tests {
     fn parses_real_list_files() {
         // All three repo list formats must yield the same 16 structures
         // (list-2/3 order odd-then-even, list-1 sequential — same set).
-        let base = Path::new("tests/5dendralene");
+        // Manifest-relative so the test works regardless of cwd.
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/5dendralene");
         let l1 = load_list_file(&base.join("list-1.txt")).unwrap();
         let l2 = load_list_file(&base.join("list-2.txt")).unwrap();
         let l3 = load_list_file(&base.join("list-3.txt")).unwrap();

@@ -31,21 +31,28 @@ use rmsd::reorder::ReorderMethod;
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn fixture(sub: &str) -> std::path::PathBuf {
+    // Manifest-relative so tests work regardless of runner cwd.
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(sub)
+}
+
 fn load_dend(n: u8) -> Molecule {
-    let text =
-        std::fs::read_to_string(format!("tests/5dendralene/5dendralene_{n:02}.xyz")).unwrap();
+    let text = std::fs::read_to_string(fixture(&format!("5dendralene/5dendralene_{n:02}.xyz")))
+        .unwrap();
     let m = xyz::parse_xyz(&text).unwrap();
     assert_eq!(m.len(), 22, "dendralene conformer must have 22 atoms");
     m
 }
 
 fn load_xyz(name: &str) -> Molecule {
-    let text = std::fs::read_to_string(format!("tests/golden/{name}")).unwrap();
+    let text = std::fs::read_to_string(fixture(&format!("golden/{name}"))).unwrap();
     xyz::parse_xyz(&text).unwrap()
 }
 
 fn load_pdb(name: &str) -> Molecule {
-    let text = std::fs::read_to_string(format!("tests/golden/{name}")).unwrap();
+    let text = std::fs::read_to_string(fixture(&format!("golden/{name}"))).unwrap();
     pdb::parse_pdb(&text, false).unwrap()
 }
 
