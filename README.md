@@ -109,6 +109,7 @@ mirror images but alters stereochemistry;
 Requires a recent stable Rust toolchain (edition 2021):
 
 ```sh
+git clone https://github.com/lenhanpham/rmsd.git
 cargo build --release
 ./target/release/rmsd --version   # rmsd 0.1.0
 ```
