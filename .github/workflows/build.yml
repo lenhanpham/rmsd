@@ -69,5 +69,9 @@ jobs:
         run: cargo test --verbose
 
       - name: Smoke test matrix mode
-        run: cargo run -- tests/5dendralene/list-1.txt --out ${{ runner.temp }}/ci-matrix.csv
+        run: cargo run -- tests/5dendralene/list-1.txt --out ci-matrix.csv --threads 2
+        shell: bash
+
+      - name: Check smoke test output
+        run: test -s ci-matrix.csv && rm ci-matrix.csv
         shell: bash

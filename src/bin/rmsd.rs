@@ -248,6 +248,18 @@ fn run_matrix(cli: &Cli, list_path: &Path) -> anyhow::Result<()> {
         .out
         .clone()
         .unwrap_or_else(|| rmsd::list::csv_path_for(list_path));
+    // Create a missing output directory instead of failing with a bare
+    // OS error (e.g. temp dirs on CI runners).
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "cannot create output directory '{}': {e}",
+                    parent.to_string_lossy()
+                )
+            })?;
+        }
+    }
     let expected_header = rmsd::matrix::csv_header(&full_labels);
 
     // Resume: count complete leading rows already on disk, dropping any

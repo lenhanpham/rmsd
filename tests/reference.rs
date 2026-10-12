@@ -39,8 +39,8 @@ fn fixture(sub: &str) -> std::path::PathBuf {
 }
 
 fn load_dend(n: u8) -> Molecule {
-    let text = std::fs::read_to_string(fixture(&format!("5dendralene/5dendralene_{n:02}.xyz")))
-        .unwrap();
+    let text =
+        std::fs::read_to_string(fixture(&format!("5dendralene/5dendralene_{n:02}.xyz"))).unwrap();
     let m = xyz::parse_xyz(&text).unwrap();
     assert_eq!(m.len(), 22, "dendralene conformer must have 22 atoms");
     m
