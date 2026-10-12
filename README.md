@@ -114,6 +114,11 @@ cargo build --release
 ./target/release/rmsd --version   # rmsd 0.1.0
 ```
 
+Export the binary directory in your .bashrc if you want to use rmsd directly from your terminal 
+```sh
+export PATH=/path/to/rmsd/target/release:$PATH 
+```
+
 ## Usage
 
 ```text
