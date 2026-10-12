@@ -1,0 +1,93 @@
+name: Release (Windows)
+
+# Manual Windows binary release.
+# Run from the Actions tab ("Run workflow"), enter a tag like v0.1.0,
+# and collect rmsd-<tag>-windows-x86_64.zip from the run's artifacts
+# (plus an optional GitHub Release on that tag).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g., v0.1.0)'
+        required: true
+        type: string
+      release_name:
+        description: 'Release name'
+        required: true
+        type: string
+      release_notes:
+        description: 'Release notes'
+        required: false
+        type: string
+        default: 'Release build for rmsd'
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-windows:
+    name: Build Windows binary
+    runs-on: windows-latest
+    # Required for softprops/action-gh-release to create the release.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Show toolchain versions
+        run: |
+          cargo --version
+          rustc --version
+
+      - name: Build release
+        run: cargo build --release --verbose
+
+      - name: Run tests
+        run: cargo test --release --verbose
+
+      - name: Verify binary exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "target/release/rmsd.exe")) {
+            Write-Error "target/release/rmsd.exe not found after build"
+            exit 1
+          }
+          Get-Item "target/release/rmsd.exe" | Format-List Name, Length, LastWriteTime
+          ./target/release/rmsd.exe --version
+
+      - name: Stage package
+        shell: pwsh
+        run: |
+          $pkg = "rmsd-${{ inputs.tag_name }}-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "dist/$pkg" | Out-Null
+          Copy-Item "target/release/rmsd.exe" "dist/$pkg/"
+          Copy-Item "README.md" "dist/$pkg/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$pkg" -DestinationPath "dist/$pkg.zip" -Force
+          Get-Item "dist/$pkg.zip" | Format-List Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmsd-${{ inputs.tag_name }}-windows-x86_64
+          path: dist/rmsd-${{ inputs.tag_name }}-windows-x86_64.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.release_name }}
+          body: ${{ inputs.release_notes }}
+          prerelease: ${{ inputs.prerelease }}
+          files: dist/rmsd-${{ inputs.tag_name }}-windows-x86_64.zip
