@@ -109,7 +109,7 @@ fn rmsd_fn_for(rotation: Rotation) -> fn(&[Coord], &[Coord]) -> f64 {
     }
 }
 
-fn reorder_fn_for(m: ReorderMethod) -> Option<fn(&[u8], &[u8], &[Coord], &[Coord]) -> Vec<usize>> {
+fn reorder_fn_for(m: ReorderMethod) -> Option<crate::reorder::ReorderFn> {
     match m {
         ReorderMethod::None => None,
         ReorderMethod::Hungarian => Some(crate::reorder::reorder_hungarian),

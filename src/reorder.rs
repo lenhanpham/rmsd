@@ -11,6 +11,9 @@ use crate::geom::{kabsch_rmsd, Coord};
 use crate::inertia::{center_of_mass, inertia_tensor, sorted_eigenvectors};
 use std::collections::BTreeSet;
 
+/// Reorder function: returns a Q-index view with one entry per P position.
+pub type ReorderFn = fn(&[u8], &[u8], &[Coord], &[Coord]) -> Vec<usize>;
+
 /// Supported reorder methods (no `qml` — see module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReorderMethod {
@@ -97,14 +100,16 @@ pub fn hungarian_assign(cost: &[Vec<f64>]) -> Vec<usize> {
             *v -= m;
         }
     }
-    // Step 2: col reduction.
-    for j in 0..n {
-        let mut m = f64::INFINITY;
-        for i in 0..n {
-            m = m.min(c[i][j]);
+    // Step 2: col reduction (column minima, then subtract).
+    let mut col_min = vec![f64::INFINITY; n];
+    for row in &c {
+        for (m, &v) in col_min.iter_mut().zip(row.iter()) {
+            *m = m.min(v);
         }
-        for i in 0..n {
-            c[i][j] -= m;
+    }
+    for row in c.iter_mut() {
+        for (v, &m) in row.iter_mut().zip(col_min.iter()) {
+            *v -= m;
         }
     }
     let mut star = vec![vec![false; n]; n];
@@ -124,9 +129,9 @@ pub fn hungarian_assign(cost: &[Vec<f64>]) -> Vec<usize> {
     }
     row_covered.fill(false);
     col_covered.fill(false);
-    for i in 0..n {
-        for j in 0..n {
-            if star[i][j] {
+    for star_row in &star {
+        for (j, &s) in star_row.iter().enumerate() {
+            if s {
                 col_covered[j] = true;
             }
         }
@@ -204,18 +209,14 @@ pub fn hungarian_assign(cost: &[Vec<f64>]) -> Vec<usize> {
                     let _ = li;
                 }
                 for (k, &(i, j)) in path.iter().enumerate() {
-                    if k % 2 == 0 {
-                        star[i][j] = true;
-                    } else {
-                        star[i][j] = false;
-                    }
+                    star[i][j] = k % 2 == 0;
                 }
                 prime = vec![vec![false; n]; n];
                 row_covered.fill(false);
                 col_covered.fill(false);
-                for i in 0..n {
-                    for j in 0..n {
-                        if star[i][j] {
+                for star_row in &star {
+                    for (j, &s) in star_row.iter().enumerate() {
+                        if s {
                             col_covered[j] = true;
                         }
                     }

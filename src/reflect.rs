@@ -50,7 +50,7 @@ pub fn check_reflections(
     q_atoms: &[u8],
     p_coord: &[Coord],
     q_coord: &[Coord],
-    reorder: Option<fn(&[u8], &[u8], &[Coord], &[Coord]) -> Vec<usize>>,
+    reorder: Option<crate::reorder::ReorderFn>,
     rmsd_fn: fn(&[Coord], &[Coord]) -> f64,
     keep_stereo: bool,
 ) -> (f64, [usize; 3], [f64; 3], Vec<usize>) {

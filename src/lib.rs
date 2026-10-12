@@ -22,4 +22,4 @@ pub use geom::{
     kabsch_weighted_rmsd, quaternion_rmsd, quaternion_rotate, rmsd,
 };
 pub use pipeline::{compute_rmsd, Filter, Options, PipelineError, Rotation};
-pub use reorder::ReorderMethod;
+pub use reorder::{ReorderFn, ReorderMethod};

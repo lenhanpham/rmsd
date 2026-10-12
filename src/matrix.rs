@@ -322,10 +322,10 @@ mod tests {
         ];
         let labels = vec!["a".into(), "b".into(), "c".into()];
         let mat = pairwise_matrix(&mols, &labels, &kabsch_opts(), &noop).unwrap();
-        for i in 0..3 {
-            assert_eq!(mat[i][i], Some(0.0));
-            for j in (i + 1)..3 {
-                assert_eq!(mat[i][j], None);
+        for (i, row) in mat.iter().enumerate() {
+            assert_eq!(row[i], Some(0.0));
+            for cell in row.iter().skip(i + 1) {
+                assert_eq!(*cell, None);
             }
         }
         for (i, j) in [(1, 0), (2, 0), (2, 1)] {
@@ -442,7 +442,7 @@ mod tests {
         assert!(merge_partials(&[]).is_err());
         let dup = h.clone() + "a,0.000000,,\n";
         assert!(merge_partials(&[p1.clone(), dup]).is_err());
-        assert!(merge_partials(&[p1.clone()]).is_err()); // missing b, c
+        assert!(merge_partials(std::slice::from_ref(&p1)).is_err()); // missing b, c
         let bad = ",a,b\n".to_string() + "a,0.000000,\n";
         assert!(merge_partials(&[p1.clone(), bad]).is_err());
     }
