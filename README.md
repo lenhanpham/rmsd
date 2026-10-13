@@ -7,7 +7,7 @@
 </p>
 <p align="center">
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/Rust-1.70+-orange.svg" alt="Rust">
+    <img src="https://img.shields.io/badge/Rust-1.85+-orange.svg" alt="Rust">
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
@@ -106,7 +106,7 @@ mirror images but alters stereochemistry;
 
 ## Install & build
 
-Requires a recent stable Rust toolchain (edition 2021):
+Requires a recent stable Rust toolchain (edition 2024, rustc 1.85+):
 
 ```sh
 git clone https://github.com/lenhanpham/rmsd.git

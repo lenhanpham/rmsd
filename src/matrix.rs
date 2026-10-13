@@ -14,7 +14,7 @@
 //! - interrupted runs resume by counting complete rows in existing output.
 
 use crate::io::Molecule;
-use crate::pipeline::{compute_rmsd, Options, PipelineError};
+use crate::pipeline::{Options, PipelineError, compute_rmsd};
 use rayon::prelude::*;
 use std::fmt::Write as _;
 use std::ops::Range;

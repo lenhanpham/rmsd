@@ -23,7 +23,7 @@
 //! NOTE: `brute` reorder is only exercised on the 8-atom ethane pair —
 //! on 22-atom molecules the per-element factorial search never finishes.
 
-use rmsd::io::{pdb, xyz, Molecule};
+use rmsd::io::{Molecule, pdb, xyz};
 use rmsd::pipeline::{Filter, Options, Reflections, Rotation};
 use rmsd::reorder::ReorderMethod;
 
@@ -359,7 +359,7 @@ fn dendralene_shuffled_order_recovered_by_hungarian() {
             .atoms
             .iter()
             .enumerate()
-            .filter(|(_, &a)| a == z)
+            .filter(|&(_, &a)| a == z)
             .map(|(i, _)| i)
             .rev()
             .collect();

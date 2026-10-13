@@ -21,5 +21,5 @@ pub use geom::{
     centroid, kabsch, kabsch_fit, kabsch_rmsd, kabsch_rotate, kabsch_weighted, kabsch_weighted_fit,
     kabsch_weighted_rmsd, quaternion_rmsd, quaternion_rotate, rmsd,
 };
-pub use pipeline::{compute_rmsd, Filter, Options, PipelineError, Rotation};
+pub use pipeline::{Filter, Options, PipelineError, Rotation, compute_rmsd};
 pub use reorder::{ReorderFn, ReorderMethod};

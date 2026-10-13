@@ -1,9 +1,9 @@
 //! End-to-end pipeline — port of `main()` in `calculate_rmsd.py`.
 
-use crate::geom::{kabsch, kabsch_rmsd, quaternion_rmsd, rmsd, Coord};
+use crate::geom::{Coord, kabsch, kabsch_rmsd, quaternion_rmsd, rmsd};
 use crate::io::Molecule;
 use crate::reflect::check_reflections;
-use crate::reorder::{reorder_dispatch, ReorderMethod};
+use crate::reorder::{ReorderMethod, reorder_dispatch};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -152,14 +152,14 @@ pub fn compute_rmsd(
                 .atoms
                 .iter()
                 .enumerate()
-                .filter(|(_, &z)| z != 1)
+                .filter(|&(_, &z)| z != 1)
                 .map(|(i, _)| i)
                 .collect();
             let qi: Vec<usize> = q
                 .atoms
                 .iter()
                 .enumerate()
-                .filter(|(_, &z)| z != 1)
+                .filter(|&(_, &z)| z != 1)
                 .map(|(i, _)| i)
                 .collect();
             (pi, qi, true)

@@ -7,7 +7,7 @@
 //! NOTE: `reorder_similarity` (QML/FCHL19) is intentionally omitted.
 //! See README for supported methods.
 
-use crate::geom::{kabsch_rmsd, Coord};
+use crate::geom::{Coord, kabsch_rmsd};
 use crate::inertia::{center_of_mass, inertia_tensor, sorted_eigenvectors};
 use std::collections::BTreeSet;
 
@@ -78,7 +78,7 @@ fn indices_of(atoms: &[u8], z: u8) -> Vec<usize> {
     atoms
         .iter()
         .enumerate()
-        .filter(|(_, &a)| a == z)
+        .filter(|&(_, &a)| a == z)
         .map(|(i, _)| i)
         .collect()
 }

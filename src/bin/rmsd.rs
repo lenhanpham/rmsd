@@ -6,7 +6,7 @@
 //!   pair once and writes a lower-triangular CSV beside the list file.
 
 use clap::{ArgGroup, Parser};
-use rmsd::io::{read_text, write_xyz, Format, Molecule};
+use rmsd::io::{Format, Molecule, read_text, write_xyz};
 use rmsd::pipeline::{Filter, Options, Reflections, Rotation};
 use rmsd::reorder::ReorderMethod;
 use std::path::{Path, PathBuf};
@@ -250,15 +250,15 @@ fn run_matrix(cli: &Cli, list_path: &Path) -> anyhow::Result<()> {
         .unwrap_or_else(|| rmsd::list::csv_path_for(list_path));
     // Create a missing output directory instead of failing with a bare
     // OS error (e.g. temp dirs on CI runners).
-    if let Some(parent) = out_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "cannot create output directory '{}': {e}",
-                    parent.to_string_lossy()
-                )
-            })?;
-        }
+    if let Some(parent) = out_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!(
+                "cannot create output directory '{}': {e}",
+                parent.to_string_lossy()
+            )
+        })?;
     }
     let expected_header = rmsd::matrix::csv_header(&full_labels);
 

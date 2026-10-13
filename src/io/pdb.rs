@@ -76,14 +76,16 @@ pub fn parse_coord_line(line: &str) -> Option<Coord> {
     // Fallback: first 3 consecutive tokens containing '.'.
     let tokens: Vec<&str> = line.split_whitespace().collect();
     for i in 0..tokens.len().saturating_sub(2) {
-        if tokens[i].contains('.') && tokens[i + 1].contains('.') && tokens[i + 2].contains('.') {
-            if let (Ok(a), Ok(b), Ok(c)) = (
+        if tokens[i].contains('.')
+            && tokens[i + 1].contains('.')
+            && tokens[i + 2].contains('.')
+            && let (Ok(a), Ok(b), Ok(c)) = (
                 tokens[i].parse::<f64>(),
                 tokens[i + 1].parse::<f64>(),
                 tokens[i + 2].parse::<f64>(),
-            ) {
-                return Some([a, b, c]);
-            }
+            )
+        {
+            return Some([a, b, c]);
         }
     }
     None
