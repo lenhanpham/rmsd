@@ -230,6 +230,34 @@ pub fn compute_rmsd(
         q_review = Some(review);
     }
 
+    // Auto-reorder fallback: when the element sequences already match but
+    // same-element atoms are permuted between the two files, index-to-index
+    // pairing would pair the wrong atoms. Without an explicit --reorder or
+    // reflection request, try the configured reorder method (default
+    // inertia-hungarian) and keep the minimum RMSD vs index-to-index, so
+    // results are never worse than before and permuted-atom cases are fixed.
+    // Skipped whenever a reorder/review is already active or reflections
+    // produced a result.
+    if result_rmsd.is_none()
+        && q_review.is_none()
+        && same_order
+        && !opts.do_reorder
+        && opts.reflections == Reflections::None
+    {
+        if opts.print_rotated && use_view {
+            return Err(PipelineError::PrintFilterConflict);
+        }
+        if let Some(review) = reorder_dispatch(opts.reorder, &p_atoms, &q_atoms, &p_sub, &q_sub) {
+            let q_re: Vec<Coord> = review.iter().map(|&i| q_sub[i]).collect();
+            let reordered = rmsd_fn(&p_sub, &q_re);
+            let baseline = rmsd_fn(&p_sub, &q_sub);
+            if reordered < baseline {
+                result_rmsd = Some(reordered);
+                q_review = Some(review);
+            }
+        }
+    }
+
     if let Some(review) = q_review.clone() {
         q_atoms = review.iter().map(|&i| q_atoms[i]).collect();
         q_sub = review.iter().map(|&i| q_sub[i]).collect();
@@ -343,11 +371,11 @@ mod tests {
     }
 
     #[test]
-    fn shuffled_needs_reorder() {
-        // Same element types, shuffled positions: no error, but RMSD > 0
-        // until Hungarian reorder is enabled.
-        // Same element types, shuffled positions: asymmetric case so the
-        // mislabeled correspondence cannot be fixed by rotation alone.
+    fn shuffled_same_order_auto_reorders() {
+        // Same element sequence with same-element atoms permuted between the
+        // two files. Default options auto-attempt reorder and keep the
+        // minimum vs index-to-index, so the naive pairing is corrected to ~0
+        // without an explicit --reorder.
         let p = mol(
             vec![6, 6, 8],
             vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
@@ -356,8 +384,9 @@ mod tests {
             vec![6, 6, 8],
             vec![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
         );
-        let plain = compute_rmsd(&p, &q, &Options::default(), ("a", "b")).unwrap();
-        assert!(plain.rmsd > 1e-6);
+        let fixed = compute_rmsd(&p, &q, &Options::default(), ("a", "b")).unwrap();
+        assert!(fixed.rmsd < 1e-9, "auto reorder must fix permuted atoms");
+        // Explicit reorder also recovers it.
         let opts = Options {
             do_reorder: true,
             reorder: ReorderMethod::Hungarian,
@@ -365,7 +394,17 @@ mod tests {
         };
         let o = compute_rmsd(&p, &q, &opts, ("a", "b")).unwrap();
         assert!(o.rmsd < 1e-9);
-        // Different atom order without reorder must error.
+        // With reorder disabled entirely, index-to-index pairing stays wrong.
+        let no_reorder = Options {
+            reorder: ReorderMethod::None,
+            ..Options::default()
+        };
+        let naive = compute_rmsd(&p, &q, &no_reorder, ("a", "b")).unwrap();
+        assert!(
+            naive.rmsd > 1e-6,
+            "without reorder, permuted atoms mis-pair"
+        );
+        // Different atom order without reorder must still error.
         let pd = mol(vec![6, 8], vec![[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
         let qd = mol(vec![8, 6], vec![[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]);
         assert!(compute_rmsd(&pd, &qd, &Options::default(), ("a", "b")).is_err());

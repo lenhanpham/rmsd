@@ -297,22 +297,41 @@ fn run_matrix(cli: &Cli, list_path: &Path) -> anyhow::Result<()> {
         }
     };
 
-    if start >= range.end {
-        println!(
-            "output '{}' already complete ({}x{}, {total} pairs)",
-            out_path.to_string_lossy(),
-            entries.len(),
-            entries.len(),
-        );
-        return Ok(());
+    let mut need_header = !exists || cli.overwrite;
+    let mut cur = start;
+    if cur >= range.end {
+        // Existing output already covers the full requested range. Unless the
+        // user explicitly asked to overwrite, archive the complete file so the
+        // user's data is not silently lost, then recalculate from scratch.
+        if exists && !cli.overwrite {
+            let archived = archive_path_for(&out_path);
+            std::fs::rename(&out_path, &archived).map_err(|e| {
+                anyhow::anyhow!("cannot archive '{out_path:?}' to '{archived:?}': {e}")
+            })?;
+            println!(
+                "rmsd: output '{}' already complete ({}x{}, {total} pairs); archived to '{}' and recalculating",
+                out_path.to_string_lossy(),
+                entries.len(),
+                entries.len(),
+                archived.to_string_lossy(),
+            );
+            cur = range.start;
+            need_header = true;
+        } else {
+            println!(
+                "output '{}' already complete ({}x{}, {total} pairs)",
+                out_path.to_string_lossy(),
+                entries.len(),
+                entries.len(),
+            );
+            return Ok(());
+        }
     }
     // Row blocks bound output buffering: compute, append, free.
     // Fresh files (new path, or --overwrite) always start with the header —
     // including range chunks, which are standalone mergeable partials.
     let row_bytes = (entries.len() as u64 + 1) * 14;
     let block = rmsd::matrix::block_rows(row_bytes, max_mem);
-    let mut need_header = !exists || cli.overwrite;
-    let mut cur = start;
     while cur < range.end {
         let next = (cur + block).min(range.end);
         let rows = rmsd::matrix::pairwise_rows(&mols, &labels, &opts, cur..next, &report)?;
@@ -367,6 +386,47 @@ fn run_merge(out: &Path, partials: &[PathBuf]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Build an archived path for `path`: `full.csv -> full_YYYYMMDD_HHMMSS.csv`.
+fn archive_path_for(path: &Path) -> PathBuf {
+    let ts = timestamp_suffix();
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("output");
+    let archived = if let Some((stem, ext)) = name.rsplit_once('.') {
+        format!("{stem}_{ts}.{ext}")
+    } else {
+        format!("{name}_{ts}")
+    };
+    path.with_file_name(archived)
+}
+
+/// Current timestamp as `YYYYMMDD_HHMMSS` from UNIX seconds (pure std,
+/// no `chrono` dependency).
+fn timestamp_suffix() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = secs / 86400;
+    let sod = secs % 86400;
+    let hh = sod / 3600;
+    let mm = (sod % 3600) / 60;
+    let ss = sod % 60;
+    // Civil calendar from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, m, d, hh, mm, ss)
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if let Some(out) = &cli.merge_csv {
@@ -393,5 +453,37 @@ fn main() -> anyhow::Result<()> {
         (None, None, _) => {
             anyhow::bail!("expected FILE_A FILE_B, a single LIST file, or --from-list LIST")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_suffix_has_expected_format() {
+        let ts = timestamp_suffix();
+        let b = ts.as_bytes();
+        // YYYYMMDD_HHMMSS = 15 chars.
+        assert_eq!(b.len(), 15);
+        assert_eq!(b[8], b'_');
+        assert!(b[..8].iter().all(|x| x.is_ascii_digit()));
+        assert!(b[9..].iter().all(|x| x.is_ascii_digit()));
+    }
+
+    #[test]
+    fn archive_path_inserts_timestamp_before_extension() {
+        let src = std::env::temp_dir().join("full.csv");
+        let archived = archive_path_for(&src);
+        assert_eq!(archived.parent(), Some(std::env::temp_dir().as_path()));
+        let b = archived.file_name().unwrap().to_str().unwrap().as_bytes();
+        // name == "full_" (5) + ts (15) + ".csv" (4) = 24 bytes.
+        assert_eq!(b.len(), 24);
+        assert_eq!(&b[..5], b"full_");
+        assert_eq!(&b[20..], b".csv");
+        // timestamp's internal underscore at global index 5 + 8 = 13.
+        assert_eq!(b[13], b'_');
+        assert!(b[5..13].iter().all(|x| x.is_ascii_digit()));
+        assert!(b[14..20].iter().all(|x| x.is_ascii_digit()));
     }
 }

@@ -581,3 +581,27 @@ fn golden_pdb_matches_python() {
     );
     approx::assert_abs_diff_eq!(rmsd(&p, &q, &o), 0.01238223045975489, epsilon = 1e-9);
 }
+
+// ---------------------------------------------------------------------------
+// Bug regressions
+// ---------------------------------------------------------------------------
+
+/// Regression test for `tests/bugs/9_75.xyz` vs `tests/bugs/9_78.xyz`:
+/// identical element sequences with same-element atoms permuted between the
+/// two files. Index-to-index pairing previously gave RMSD ~1.74; default
+/// options now auto-attempt reorder and recover ~0.0066.
+#[test]
+fn bug_9_75_vs_9_78_permuted_atoms() {
+    let p = xyz::parse_xyz(&std::fs::read_to_string(fixture("bugs/9_75.xyz")).unwrap()).unwrap();
+    let q = xyz::parse_xyz(&std::fs::read_to_string(fixture("bugs/9_78.xyz")).unwrap()).unwrap();
+    assert_eq!(p.atoms, q.atoms, "bug pair must share element sequence");
+    // Default options (do_reorder=false, reorder=InertiaHungarian) auto-reorder.
+    let r = rmsd(&p, &q, &Options::default());
+    approx::assert_abs_diff_eq!(r, 0.0066, epsilon = 1e-3);
+    // Sanity: index-to-index without reorder is far worse (the original bug).
+    let no_reorder = Options {
+        reorder: ReorderMethod::None,
+        ..Options::default()
+    };
+    assert!(rmsd(&p, &q, &no_reorder) > 1.0);
+}
