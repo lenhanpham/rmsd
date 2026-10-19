@@ -96,8 +96,17 @@ struct Cli {
     out: Option<PathBuf>,
 
     /// Matrix mode: discard existing output and recompute from scratch
-    #[arg(long)]
+    /// without archiving it
+    #[arg(long, conflicts_with = "resume")]
     overwrite: bool,
+
+    /// Matrix mode: resume an incomplete existing CSV instead of the
+    /// default (archive the output, then recalculate from scratch).
+    /// Validates the header and row labels against the structure list,
+    /// truncates any torn trailing line, and appends only the remaining
+    /// rows. Conflicts with `--overwrite`.
+    #[arg(long, conflicts_with = "overwrite")]
+    resume: bool,
 
     /// Merge partial matrix CSVs into OUT and exit
     #[arg(long, value_name = "OUT")]
@@ -262,26 +271,49 @@ fn run_matrix(cli: &Cli, list_path: &Path) -> anyhow::Result<()> {
     }
     let expected_header = rmsd::matrix::csv_header(&full_labels);
 
-    // Resume: count complete leading rows already on disk, dropping any
-    // torn trailing line by truncating the file to the resume point.
     let exists = out_path.exists();
     let mut start = range.start;
-    if exists && !cli.overwrite {
-        let text = std::fs::read_to_string(&out_path)?;
-        let (done, keep) = rmsd::matrix::resume_state(&text, &full_labels)
-            .map_err(|e| anyhow::anyhow!("cannot resume '{out_path:?}': {e}"))?;
-        if done < range.start || done > range.end {
-            anyhow::bail!(
-                "existing output covers rows 0..{done} which does not extend this range (use --overwrite)"
+    // A file we (re)create always leads with the header; --resume appends to
+    // the existing (torn-tail-truncated) file without one.
+    let mut need_header = true;
+
+    if exists {
+        if cli.resume {
+            // Opt-in resume: validate header/row labels, drop any torn
+            // trailing line, then append only the rows still missing.
+            let text = std::fs::read_to_string(&out_path)?;
+            let (done, keep) = rmsd::matrix::resume_state(&text, &full_labels)
+                .map_err(|e| anyhow::anyhow!("cannot resume '{out_path:?}': {e}"))?;
+            if done < range.start || done > range.end {
+                anyhow::bail!(
+                    "existing output covers rows 0..{done} which does not extend this range (use --overwrite)"
+                );
+            }
+            if keep as u64 != text.len() as u64 {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&out_path)?
+                    .set_len(keep as u64)?;
+            }
+            start = done;
+            need_header = false;
+        } else if cli.overwrite {
+            // Full rewrite: discard the existing output without archiving.
+            start = range.start;
+        } else {
+            // Default: always back up the existing output first, then
+            // recalculate from scratch — never resume silently.
+            let archived = archive_path_for(&out_path)?;
+            std::fs::rename(&out_path, &archived).map_err(|e| {
+                anyhow::anyhow!("cannot archive '{out_path:?}' to '{archived:?}': {e}")
+            })?;
+            println!(
+                "rmsd: output '{}' already exists; archived to '{}' and recalculating from scratch",
+                out_path.to_string_lossy(),
+                archived.to_string_lossy(),
             );
+            start = range.start;
         }
-        if keep as u64 != text.len() as u64 {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(&out_path)?
-                .set_len(keep as u64)?;
-        }
-        start = done;
     }
 
     let total = entries.len() * (entries.len() + 1) / 2;
@@ -297,39 +329,21 @@ fn run_matrix(cli: &Cli, list_path: &Path) -> anyhow::Result<()> {
         }
     };
 
-    let mut need_header = !exists || cli.overwrite;
-    let mut cur = start;
-    if cur >= range.end {
-        // Existing output already covers the full requested range. Unless the
-        // user explicitly asked to overwrite, archive the complete file so the
-        // user's data is not silently lost, then recalculate from scratch.
-        if exists && !cli.overwrite {
-            let archived = archive_path_for(&out_path);
-            std::fs::rename(&out_path, &archived).map_err(|e| {
-                anyhow::anyhow!("cannot archive '{out_path:?}' to '{archived:?}': {e}")
-            })?;
-            println!(
-                "rmsd: output '{}' already complete ({}x{}, {total} pairs); archived to '{}' and recalculating",
-                out_path.to_string_lossy(),
-                entries.len(),
-                entries.len(),
-                archived.to_string_lossy(),
-            );
-            cur = range.start;
-            need_header = true;
-        } else {
-            println!(
-                "output '{}' already complete ({}x{}, {total} pairs)",
-                out_path.to_string_lossy(),
-                entries.len(),
-                entries.len(),
-            );
-            return Ok(());
-        }
+    // A resumed range that is already complete has nothing left to append.
+    if start >= range.end {
+        println!(
+            "output '{}' already complete ({}x{}, {total} pairs); nothing to resume",
+            out_path.to_string_lossy(),
+            entries.len(),
+            entries.len(),
+        );
+        return Ok(());
     }
+    let mut cur = start;
     // Row blocks bound output buffering: compute, append, free.
-    // Fresh files (new path, or --overwrite) always start with the header —
-    // including range chunks, which are standalone mergeable partials.
+    // Fresh files (new path, --overwrite, or default re-calc) always start
+    // with the header — including range chunks, which are standalone
+    // mergeable partials. --resume appends to the truncated existing file.
     let row_bytes = (entries.len() as u64 + 1) * 14;
     let block = rmsd::matrix::block_rows(row_bytes, max_mem);
     while cur < range.end {
@@ -386,19 +400,42 @@ fn run_merge(out: &Path, partials: &[PathBuf]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Build an archived path for `path`: `full.csv -> full_YYYYMMDD_HHMMSS.csv`.
-fn archive_path_for(path: &Path) -> PathBuf {
+/// Build an archived path for `path` in the same directory:
+/// `full.csv -> full_YYYYMMDD_HHMMSS.csv`, adding `_1`, `_2`, ... when a
+/// same-timestamp archive already exists (same-second reruns).
+fn archive_path_for(path: &Path) -> anyhow::Result<PathBuf> {
     let ts = timestamp_suffix();
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("output");
-    let archived = if let Some((stem, ext)) = name.rsplit_once('.') {
-        format!("{stem}_{ts}.{ext}")
+    let (stem, ext) = if let Some((s, e)) = name.rsplit_once('.') {
+        (s, Some(e))
     } else {
-        format!("{name}_{ts}")
+        (name, None)
     };
-    path.with_file_name(archived)
+    let build = |counter: Option<usize>| -> PathBuf {
+        let archived = match counter {
+            None => match ext {
+                Some(e) => format!("{stem}_{ts}.{e}"),
+                None => format!("{name}_{ts}"),
+            },
+            Some(c) => match ext {
+                Some(e) => format!("{stem}_{ts}_{c}.{e}"),
+                None => format!("{name}_{ts}_{c}"),
+            },
+        };
+        path.with_file_name(archived)
+    };
+    let mut counter = None;
+    for _ in 0..10_000 {
+        let candidate = build(counter);
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+        counter = Some(counter.unwrap_or(0) + 1);
+    }
+    anyhow::bail!("cannot find a free archive name for '{path:?}'")
 }
 
 /// Current timestamp as `YYYYMMDD_HHMMSS` from UNIX seconds (pure std,
@@ -474,7 +511,7 @@ mod tests {
     #[test]
     fn archive_path_inserts_timestamp_before_extension() {
         let src = std::env::temp_dir().join("full.csv");
-        let archived = archive_path_for(&src);
+        let archived = archive_path_for(&src).unwrap();
         assert_eq!(archived.parent(), Some(std::env::temp_dir().as_path()));
         let b = archived.file_name().unwrap().to_str().unwrap().as_bytes();
         // name == "full_" (5) + ts (15) + ".csv" (4) = 24 bytes.
@@ -485,5 +522,33 @@ mod tests {
         assert_eq!(b[13], b'_');
         assert!(b[5..13].iter().all(|x| x.is_ascii_digit()));
         assert!(b[14..20].iter().all(|x| x.is_ascii_digit()));
+    }
+
+    #[test]
+    fn archive_path_adds_counter_when_name_taken() {
+        // Unique stem so this test never collides with other tests running
+        // in the same second in the shared temp dir.
+        let src = std::env::temp_dir().join("archive-counter-test.csv");
+        // Drop any leftovers from a previous run.
+        let _ = std::fs::remove_file(&src);
+        let first = archive_path_for(&src).unwrap();
+        let first_name = first.file_name().unwrap().to_str().unwrap().to_string();
+        // Reserve the would-be archive; the next call must escalate to _1.
+        std::fs::File::create(&first).unwrap();
+        let second = archive_path_for(&src).unwrap();
+        let second_name = second.file_name().unwrap().to_str().unwrap().to_string();
+        assert_eq!(first.parent(), second.parent());
+        assert!(second_name.starts_with(&first_name[..first_name.len() - 4])); // same "name_<ts>"
+        assert!(second_name.ends_with("_1.csv"));
+        // Reserve it too; the next call must escalate to _2.
+        std::fs::File::create(&second).unwrap();
+        let third = archive_path_for(&src).unwrap();
+        let third_name = third.file_name().unwrap().to_str().unwrap().to_string();
+        assert!(third_name.starts_with(&first_name[..first_name.len() - 4]));
+        assert!(third_name.ends_with("_2.csv"));
+        for f in [&first, &second, &third] {
+            let _ = std::fs::remove_file(f);
+        }
+        let _ = std::fs::remove_file(&src);
     }
 }

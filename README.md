@@ -134,7 +134,7 @@ Common flags: `-r/--rotation kabsch|quaternion|none`,
 `--use-reflections-keep-stereo`, `--only-alpha-carbons` (PDB),
 `-n/--ignore-hydrogen`, `--remove-idx/--add-idx`, `--format xyz|pdb`
 (auto-detected, `.gz` transparent), `--threads`, `--max-mem`,
-`--rows START:END`, `--out`, `--overwrite`. `--print` is pair-mode only.
+`--rows START:END`, `--out`, `--overwrite`, `--resume`. `--print` is pair-mode only.
 
 ## Examples
 
@@ -196,8 +196,11 @@ rmsd --from-list big.txt --threads 32 --max-mem 64GB
 rmsd --merge-csv full.csv part-0.csv part-1.csv part-2.csv part-3.csv
 ```
 
-Interrupted runs resume from complete rows in the existing CSV
-(torn tail lines are discarded); `--overwrite` restarts fresh.
+By default an existing output CSV is always archived beside the list file
+as `<stem>_<YYYYMMDD_HHMMSS>[_<n>]<ext>` and the matrix is recalculated
+from scratch. `--resume` instead validates the existing CSV (header and
+row labels), discards any torn trailing line, and appends only the missing
+rows; `--overwrite` rewrites from scratch without archiving.
 Output streams in row blocks, so peak RAM stays at molecules + one
 block, never the full matrix. Scale note: pairs grow as n(n+1)/2, so
 million-structure sets must be chunked across many queue jobs —

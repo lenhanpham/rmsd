@@ -102,11 +102,13 @@ fn matrix_csv_matches_pair_mode() {
     }
 }
 
-/// End-to-end: a complete existing CSV is archived (not silently discarded)
-/// and recalculated; `--overwrite` recalculates without archiving; an
-/// incomplete CSV resumes without archiving.
+/// End-to-end behavior for an existing matrix output CSV:
+/// - default run: always archives it (`<stem>_<YYYYMMDD_HHMMSS>[_<n>].csv`
+///   beside the list file) and recalculates from scratch;
+/// - `--overwrite`: recalculates without archiving;
+/// - `--resume`: appends only missing rows without archiving.
 #[test]
-fn matrix_complete_output_archives_and_recalculates() {
+fn matrix_output_always_archived_by_default() {
     let bin = std::env::var("CARGO_BIN_EXE_rmsd")
         .expect("CARGO_BIN_EXE_rmsd is set by cargo for bin targets");
     let guard = tempfile_dir::create("rmsd-archive-test").unwrap();
@@ -124,25 +126,6 @@ fn matrix_complete_output_archives_and_recalculates() {
     std::fs::write(dir.join("mylist.txt"), "a.xyz, b.xyz,c.xyz,\n").unwrap();
     let list = dir.join("mylist.txt");
     let out = dir.join("full.csv");
-
-    fn run(bin: &str, list: &std::path::Path, out: &std::path::Path, extra: &[&str]) -> String {
-        let mut cmd = Command::new(bin);
-        cmd.args([
-            list.to_str().unwrap(),
-            "--out",
-            out.to_str().unwrap(),
-            "--threads",
-            "2",
-        ]);
-        cmd.args(extra);
-        let o = cmd.output().expect("failed to run rmsd binary");
-        assert!(
-            o.status.success(),
-            "rmsd run failed: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        String::from_utf8_lossy(&o.stdout).into_owned()
-    }
 
     // Count archive siblings full_*.csv.
     let archive_count = |dir: &std::path::Path| {
@@ -163,7 +146,7 @@ fn matrix_complete_output_archives_and_recalculates() {
     assert!(!o1.contains("archived to"));
     assert!(out.exists(), "full.csv should be created on first run");
 
-    // Second run (no --overwrite): archives + recalculates, message printed.
+    // Second run (default): archives + recalculates from scratch.
     let before = archive_count(dir);
     let o2 = run(&bin, &list, &out, &[]);
     assert!(
@@ -182,4 +165,153 @@ fn matrix_complete_output_archives_and_recalculates() {
         before,
         "--overwrite must not add an archive"
     );
+    assert!(out.exists(), "full.csv should still exist");
+
+    // Fourth run with --resume on the complete output: nothing to append,
+    // no archive.
+    let before = archive_count(dir);
+    let o4 = run(&bin, &list, &out, &["--resume"]);
+    assert!(!o4.contains("archived to"), "--resume must not archive");
+    assert!(o4.contains("nothing to resume"), "got: {o4}");
+    assert_eq!(
+        archive_count(dir),
+        before,
+        "--resume must not add an archive"
+    );
+}
+
+/// Run the rmsd binary in matrix mode with `--threads 2` plus `extra` args,
+/// returning stdout as a String. `bin`/`list`/`out` must outlive the call.
+fn run(bin: &str, list: &std::path::Path, out: &std::path::Path, extra: &[&str]) -> String {
+    let mut cmd = Command::new(bin);
+    cmd.args([
+        list.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+        "--threads",
+        "2",
+    ]);
+    cmd.args(extra);
+    let o = cmd.output().expect("failed to run rmsd binary");
+    assert!(
+        o.status.success(),
+        "rmsd run failed: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn matrix_default_archives_incomplete_output() {
+    let bin = std::env::var("CARGO_BIN_EXE_rmsd")
+        .expect("CARGO_BIN_EXE_rmsd is set by cargo for bin targets");
+    let guard = tempfile_dir::create("rmsd-archive-incomplete-test").unwrap();
+    let dir = guard.path();
+    let xyz = |n: &str, body: &str| {
+        std::fs::write(
+            dir.join(n),
+            format!("{}\ntitle\n{}", body.lines().count(), body),
+        )
+        .unwrap();
+    };
+    xyz("a.xyz", "C 0.0 0.0 0.0\nH 1.0 0.0 0.0\n");
+    xyz("b.xyz", "C 0.0 0.0 0.0\nH 0.0 1.0 0.0\n");
+    xyz("c.xyz", "C 0.0 0.0 0.0\nH 0.0 0.0 2.0\n");
+    std::fs::write(dir.join("mylist.txt"), "a.xyz, b.xyz,c.xyz,\n").unwrap();
+    let list = dir.join("mylist.txt");
+    let out = dir.join("full.csv");
+
+    // Pre-existing incomplete output (header + first row).
+    std::fs::write(&out, ",a.xyz,b.xyz,c.xyz\na.xyz,0.000000,,\n").unwrap();
+
+    let archive_count = |dir: &std::path::Path| {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|s| s.starts_with("full_") && s.ends_with(".csv"))
+                    .unwrap_or(false)
+            })
+            .count()
+    };
+    let before = archive_count(dir);
+
+    let o = run(&bin, &list, &out, &[]);
+    assert!(
+        o.contains("archived to"),
+        "expected archive+recalc message, got: {o}"
+    );
+    assert_eq!(archive_count(dir), before + 1, "incomplete output archived");
+
+    // The matrix is regenerated complete.
+    let back = std::fs::read_to_string(&out).unwrap();
+    let lines: Vec<&str> = back.lines().collect();
+    assert_eq!(lines.len(), 4, "header + 3 rows: {lines:?}");
+    assert_eq!(lines[0], ",a.xyz,b.xyz,c.xyz");
+    assert!(lines[1].starts_with("a.xyz,"));
+    assert!(lines[2].starts_with("b.xyz,"));
+    assert!(lines[3].starts_with("c.xyz,"));
+}
+
+#[test]
+fn matrix_resume_appends_missing_rows_without_archiving() {
+    let bin = std::env::var("CARGO_BIN_EXE_rmsd")
+        .expect("CARGO_BIN_EXE_rmsd is set by cargo for bin targets");
+    let guard = tempfile_dir::create("rmsd-resume-test").unwrap();
+    let dir = guard.path();
+    let xyz = |n: &str, body: &str| {
+        std::fs::write(
+            dir.join(n),
+            format!("{}\ntitle\n{}", body.lines().count(), body),
+        )
+        .unwrap();
+    };
+    xyz("a.xyz", "C 0.0 0.0 0.0\nH 1.0 0.0 0.0\n");
+    xyz("b.xyz", "C 0.0 0.0 0.0\nH 0.0 1.0 0.0\n");
+    xyz("c.xyz", "C 0.0 0.0 0.0\nH 0.0 0.0 2.0\n");
+    std::fs::write(dir.join("mylist.txt"), "a.xyz, b.xyz,c.xyz,\n").unwrap();
+    let list = dir.join("mylist.txt");
+    let out = dir.join("full.csv");
+
+    // A complete run provides the reference output.
+    let o = run(&bin, &list, &out, &[]);
+    assert!(
+        o.contains("wrote"),
+        "expected matrix write message, got: {o}"
+    );
+    let complete = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(complete.lines().count(), 4);
+
+    // Simulate an interruption: header + first row + torn trailing line.
+    let lines: Vec<&str> = complete.lines().collect();
+    let torn = format!("{}\n{}\npartial-tail-without-newline", lines[0], lines[1]);
+    std::fs::write(&out, &torn).unwrap();
+
+    let archive_count = |dir: &std::path::Path| {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|s| s.starts_with("full_") && s.ends_with(".csv"))
+                    .unwrap_or(false)
+            })
+            .count()
+    };
+    let before = archive_count(dir);
+
+    let o = run(&bin, &list, &out, &["--resume"]);
+    assert!(!o.contains("archived to"), "--resume must not archive");
+    assert_eq!(
+        archive_count(dir),
+        before,
+        "--resume must not add an archive"
+    );
+
+    // Resumed output must be byte-identical to the full run, torn tail gone.
+    let back = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(back, complete);
 }

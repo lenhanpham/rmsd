@@ -11,7 +11,10 @@
 //!   never the full matrix;
 //! - `--rows` range chunks let queue jobs split the row space; partial
 //!   CSVs merge back with [`merge_partials`];
-//! - interrupted runs resume by counting complete rows in existing output.
+//! - an existing output CSV is archived
+//!   (`<stem>_<YYYYMMDD_HHMMSS>[_<n>]<ext>` beside the list file) and the
+//!   matrix is recomputed from scratch by default; pass `--resume` to
+//!   validate it, truncate a torn tail, and append only the missing rows.
 
 use crate::io::Molecule;
 use crate::pipeline::{Options, PipelineError, compute_rmsd};
@@ -203,7 +206,7 @@ pub fn to_csv(labels: &[String], matrix: &[Vec<Option<f64>>]) -> String {
     csv_header(labels) + &rows_to_csv(labels, matrix, 0)
 }
 
-/// Count complete leading rows in existing CSV `text` for resume:
+/// Count complete leading rows in existing CSV `text` for `--resume`:
 /// cuts a torn trailing line, checks the header, and requires data row
 /// `k` to carry `labels[k]` (else the file belongs to another run).
 /// Returns `(done_rows, keep_bytes)` where `keep_bytes` is the prefix to
@@ -238,7 +241,7 @@ pub fn resume_state(text: &str, labels: &[String]) -> Result<(usize, usize), Str
     Ok((done, cut))
 }
 
-/// Count complete leading rows in existing CSV `text` for resume.
+/// Count complete leading rows in existing CSV `text` for `--resume`.
 /// See [`resume_state`].
 pub fn completed_rows(text: &str, labels: &[String]) -> Result<usize, String> {
     resume_state(text, labels).map(|(done, _)| done)
